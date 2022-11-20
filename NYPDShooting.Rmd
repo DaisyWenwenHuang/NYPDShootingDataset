@@ -1,6 +1,6 @@
 ---
 title: "NYPDShooting"
-author: "Wenwen Huang"
+author: "W H"
 date: "October 28, 2022"
 output:
   pdf_document: default
