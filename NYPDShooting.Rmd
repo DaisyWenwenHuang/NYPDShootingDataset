@@ -1,0 +1,240 @@
+---
+title: "NYPDShooting"
+author: "Wenwen Huang"
+date: "October 28, 2022"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## **Data Description**
+
+This data contains the list of every shooting incident occurred in NYC from 2006 to the end of the previous calendar year (currently 2021).
+
+This data is manually extracted every quarter and reviewed by the Office of Management Analysis and Planning before being posted on the NYPD website. Each record represents a shooting incident in NYC and includes information about the event, the location and time of occurrence. In addition, information related to suspect and victim demographics is also included. This data can be used by the public to explore the nature of shooting/criminal activity. Please refer to the attached data footnotes for additional information about this dataset. [link] (https://catalog.data.gov/dataset/nypd-shooting-incident-data-historic)
+
+```{r libraries, message = FALSE}
+# Import necessary libraries 
+library(tidyverse)
+library(lubridate)
+library(ggplot2)
+library(dplyr)
+library(zoo)
+library(scales)
+library(caret)
+library(randomForest)
+library(MLmetrics)
+options(dplyr.summarise.inform = FALSE)
+```
+
+```{r import_data}
+# Import NYPD Shooting data set from DATA.GOV
+link <- "https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD"
+
+NYPDshooting <- read_csv(link,show_col_types = FALSE)
+```
+
+```{r exam_data}
+# data exploration
+head(NYPDshooting)
+str(NYPDshooting)
+min(NYPDshooting$OCCUR_DATE)
+```
+
+### This dataset contains `r dim(NYPDshooting)[1]` rows and `r dim(NYPDshooting)[2]` columns with information of shooting case number,shooting date and time, location, perpetrator and victim's demographic(age, sex, race). There are missing data in this dataset, and some columns' data type need to be adjusted.
+
+
+```{r data formate_1}
+NYPDshooting$STATISTICAL_MURDER_FLAG <- as.integer(
+  as.logical(NYPDshooting$STATISTICAL_MURDER_FLAG))
+# delete unwanted columns
+NYPDshooting <- NYPDshooting[, !names(NYPDshooting) %in% c('X_COORD_CD','Y_COORD_CD') ]
+
+# change OCCUR_DATE to date datatype
+NYPDshooting$OCCUR_DATE <-  mdy(NYPDshooting$OCCUR_DATE)
+
+# change INCIDENT_KEY, PRECINCT,JURISDICTION_CODE columns to character data type
+
+NYPDshooting$INCIDENT_KEY <-  as.character(NYPDshooting$INCIDENT_KEY)
+NYPDshooting$PRECINCT <-  as.character(NYPDshooting$PRECINCT)
+NYPDshooting$JURISDICTION_CODE <-  as.character(NYPDshooting$JURISDICTION_CODE)
+
+# change necessary columns to factor 
+NYPDshooting$PERP_SEX <-  as.factor(NYPDshooting$PERP_SEX)
+NYPDshooting$BORO <- as.factor(NYPDshooting$BORO)
+NYPDshooting$STATISTICAL_MURDER_FLAG <- as.factor(NYPDshooting$STATISTICAL_MURDER_FLAG)
+NYPDshooting$VIC_RACE<-  as.factor(NYPDshooting$VIC_RACE)
+
+
+```
+
+
+## Dealing with NA 
+
+```{r, dealingNA_1}
+
+colSums(is.na(NYPDshooting))
+
+# Column LOCATION_DESC, PREP_AGE_GROUP, PREP_SEX,
+# and PREP_RACE have large amount of missing data.
+
+# Column LOCATION_DESC needs attention
+LOC_NA <- sum(!complete.cases(NYPDshooting$LOCATION_DESC))
+NARatio <- percent(LOC_NA/dim(NYPDshooting)[1])
+# Column PERP_SEX needs attention
+PS_NA <- sum(!complete.cases(NYPDshooting$PERP_SEX ))
+PSNARatio <- percent(PS_NA/dim(NYPDshooting)[1])
+# Column PERE_AGE_GROUP needs attention
+PA_NA <- sum(!complete.cases(NYPDshooting$PERP_AGE_GROUP))
+PANARatio <- percent(PA_NA/dim(NYPDshooting)[1])
+# Column PERP_RACE needs attention
+PR_NA <- sum(!complete.cases(NYPDshooting$PERP_RACE))
+PRNARatio <- percent(PR_NA/dim(NYPDshooting)[1])
+# delete column 'LOCATION_DESC', 'PERP_SEX','PERP_RACE','PERP_AGE_GROUP'
+NYPDshooting <- NYPDshooting[, !names(NYPDshooting) %in%
+                               c('LOCATION_DESC','PERP_SEX','PERP_RACE','PERP_AGE_GROUP') ]
+```
+### In column LOCATION_DESC , there are `r NARatio` of data is missing. Would like to invest more to know why the data is missing so much? Is the missing data missing at random(MAR) or missing completely at random(MCAR), or missing not at random(MNAR).For now in this assignment, I will simply delete the LOCCATION_DESC column. Even this column will not be needed in this assignment, deleting it might introduce biaes or reduce the statistical power of analysis. 
+### In column PREP_AGE_GROUP(`r PANARatio`),PREP_SEX(`r PSNARatio`),PREP_RACE(`r PRNARatio`), the missing data might be caused by the reason that these cases are unsolved and suspects are still unknown. This is just my guessing and need addition verification from the data source. In this assignement, i will not use these columns. Keep in mind that this might cause biases or reduce the statistical power fo anaylsis.
+
+```{r VIC_AGE}
+print(table(NYPDshooting$VIC_AGE_GROUP, useNA = 'always'))
+# There are some missing data in VIC_AGE_GROUP makred as unknown
+# fill these unknown with the median of the age group
+NYPDshooting$VIC_AGE_GROUP[NYPDshooting$VIC_AGE_GROUP == 'UNKNOWN'] <- '25-44'
+
+NYPDshooting$VIC_AGE_GROUP <-  as.factor(NYPDshooting$VIC_AGE_GROUP)
+
+print(table(NYPDshooting$VIC_SEX, useNA = 'always'))
+# There are some missing data in VIC_SEX makred as unknown
+# fill these unknown with M (the majority)
+NYPDshooting$VIC_SEX[NYPDshooting$VIC_SEX == 'U'] <- 'M'
+
+NYPDshooting$VIC_SEX <-  as.factor(NYPDshooting$VIC_SEX)
+```
+
+
+
+
+
+
+
+
+```{r}
+summary(NYPDshooting)
+```
+# EDA
+
+```{r, plot1_bar}
+# take a look at the victim's gender
+NYPDshooting$STATISTICAL_MURDER_FLAG <- factor(NYPDshooting$STATISTICAL_MURDER_FLAG)
+print(table(NYPDshooting$VIC_SEX, useNA = 'always'))
+theme_set(theme_classic())
+plot1<- ggplot(data = NYPDshooting,aes(x= STATISTICAL_MURDER_FLAG))
+plot1 + geom_bar(aes(fill = VIC_SEX), width = .5,position = 'dodge',alpha = 0.5) + 
+  theme(plot.title.position = 'plot',axis.text.x = element_text(colour = "black")) + 
+  labs(y = 'Count', x = 'Status',title = 'Gun violence in NY', 
+       subtitle = 'Death across gender (2006-2021)', fill="Gender of victim") +
+  scale_x_discrete(labels= c('Alive','Dead')) + scale_y_continuous(expand=c(0,0),
+                                                                   limits = c(0,20000))
+ 
+  
+```
+The plot above shows the victim's gender difference in gun violence in New York city between 2006 and 2021. 
+  - Male is more likely to get involved into gun violence than female. 
+  - The number of people who survived in gun violence is bigger than the number of people who did not survive. 
+  
+```{r}
+dup = length(NYPDshooting$INCIDENT_KEY[duplicated(NYPDshooting$INCIDENT_KEY)])
+dup
+
+```
+
+### there are `r dup` cases share same case number with other cases. After a closer look at these cases, they are one case number with multiple victims or suspects.
+### In the line plot below, I will treat each row like an unique case. Note that this will introduce biases. 
+
+
+
+```{r, warning=FALSE}
+NYPDshooting$OCCUR_DATE <- as.POSIXct(NYPDshooting$OCCUR_DATE)
+tsdata <- NYPDshooting[,1:2] %>%
+  mutate(month =format(OCCUR_DATE,"%m"),
+         year = year(OCCUR_DATE)) %>%
+  group_by(year, month) %>%
+  summarize(total = sum(tabulate(factor(INCIDENT_KEY))))
+
+tsdata$Date <- paste(tsdata$year,tsdata$month,sep = '-')
+tsdata$Date <- as.yearmon(tsdata$Date)
+
+ydata <- tsdata %>%
+  group_by(year) %>%
+  summarize(total = sum(total))
+
+# plot the number of gun incident happened through 2006-2021
+pl <- ggplot(ydata,aes(year,total)) + geom_line(color ='darkorchid4') +theme_bw() +
+  labs(y = 'Count', x = 'Time',title = 'Gun violence in NY', 
+       subtitle = 'Occurance across time(2006-2021)') +
+  scale_x_continuous(breaks = seq(2006,2021,1),limits = c(2006,2022)) + theme_classic()
+pl
+```
+There are two things apparent immediately from the plot above. The number of gun violence in NY between 2006 to 2017 tends to decrease over time. There was a rebunce of the gun violence incidents in NY start from late 2019 and early 2020 and has been stayed high ever since.
+
+
+```{r}
+# take a look at gun incidents happened on each month
+u <- ggplot(tsdata,aes(x=month,y=total,colour = month))
+u  + geom_jitter()+ geom_boxplot(size=0.8,alpha=0.3,show.legend = FALSE) +
+  labs(y = 'Count', x = 'Month',title = 'Gun violence in NY', 
+       subtitle = 'Occurance across month (2006-2021)')+
+  theme(legend.position = 'none')
+
+```
+We can see from the plot above that ,in NY city between year 2006 and 2021, June, July and August have more gun incidents than other month. 
+
+
+# Predict murder flag in gun violence 
+```{r}
+table(NYPDshooting$STATISTICAL_MURDER_FLAG)
+```
+This dataset is an imbalanced dataset.This imbalancy could be just the property of the dataset. With a big ratio between majority and minority classes,some common model like logistic classification will have a good accuracy but not useful. As with imbalanced dataset, simply predict every predicted output as a majority class, the model accuracy will still be "good". Decision tree often perform well on imbalanced datasets.
+
+```{r}
+# reproducible setting
+set.seed(401)
+# split dataset to 70-30 train-test set
+NYPDshooting$index <- 1:nrow(NYPDshooting)
+train <- NYPDshooting %>% dplyr::sample_frac(0.7)
+test <- dplyr::anti_join(NYPDshooting,train,by='index')
+# check train-test
+dim(train)
+dim(test)
+```
+```{r}
+# Feature engineering
+train <- select(train,BORO,VIC_AGE_GROUP,VIC_SEX,VIC_RACE,STATISTICAL_MURDER_FLAG)
+test <- select(test,BORO,VIC_AGE_GROUP,VIC_SEX,VIC_RACE,STATISTICAL_MURDER_FLAG)
+str(train)
+```
+
+```{r}
+# random forest model
+fit <- randomForest(STATISTICAL_MURDER_FLAG~.,data=train)
+summary(fit)
+predictions <- predict(fit,test)
+table(predictions,test$STATISTICAL_MURDER_FLAG)
+Accuracy(predictions,test$STATISTICAL_MURDER_FLAG)
+```
+
+The random forest model predicted 7666 people's survival and 13 people's death among 7679 people in gun incidents in NY city. The model accuracy is 80.8%. 
+
+
+```{r}
+SI <- sessionInfo()
+SI
+```
+
+
